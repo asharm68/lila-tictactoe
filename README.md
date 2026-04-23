@@ -1,6 +1,6 @@
 # LILA × Tic-Tac-Toe — Multiplayer Backend Assignment
 
-A production-ready, real-time multiplayer Tic-Tac-Toe game built with **Nakama** (server-authoritative backend) and **React** (frontend), deployed via Docker Compose locally and Vercel + Railway/Fly.io for production.
+A production-ready, real-time multiplayer Tic-Tac-Toe game built with **Nakama** (server-authoritative backend) and **React** (frontend), deployed via Docker Compose locally and Vercel for the frontend.
 
 ---
 
@@ -8,9 +8,9 @@ A production-ready, real-time multiplayer Tic-Tac-Toe game built with **Nakama**
 
 | Resource | URL |
 |---|---|
-| Game (Frontend) | `https://lila-tictactoe.vercel.app` *(after deploy)* |
-| Nakama Console | `http://<your-server>:7351` |
-| Nakama HTTP API | `http://<your-server>:7350` |
+| Game (Frontend) | `https://lila-tictactoe-kawqywc88-asharm68s-projects.vercel.app` |
+| Nakama Console | `http://localhost:7351` (local) |
+| Nakama HTTP API | `http://localhost:7350` (local) |
 
 ---
 
@@ -27,9 +27,9 @@ A production-ready, real-time multiplayer Tic-Tac-Toe game built with **Nakama**
 ┌───────────────────────▼─────────────────────────────────┐
 │                  NAKAMA SERVER (Go)                     │
 │  ┌──────────────────────────────────────────────────┐   │
-│  │        TypeScript Runtime Module                  │   │
-│  │  • match_handler.ts  — all game logic            │   │
-│  │  • RPC: find_match   — matchmaking               │   │
+│  │        JavaScript Runtime Module (index.js)       │   │
+│  │  • match_handler.ts  — all game logic (source)   │   │
+│  │  • RPC: find_match   — storage-based matchmaking │   │
 │  │  • RPC: get_leaderboard — rankings               │   │
 │  └──────────────────────────────────────────────────┘   │
 │  ┌──────────────────────────────────────────────────┐   │
@@ -37,6 +37,7 @@ A production-ready, real-time multiplayer Tic-Tac-Toe game built with **Nakama**
 │  │  • Device authentication (no account needed)     │   │
 │  │  • Authoritative match handler (tick-based)      │   │
 │  │  • Leaderboard with monthly reset                │   │
+│  │  • Storage API for lobby/matchmaking             │   │
 │  │  • WebSocket real-time message broadcast         │   │
 │  └──────────────────────────────────────────────────┘   │
 └───────────────────────┬─────────────────────────────────┘
@@ -61,9 +62,13 @@ All game state lives on the Nakama server. The client only sends *intent* (a pos
 
 **Matchmaking Flow**
 1. Client calls `find_match` RPC
-2. Server queries for existing matches with label `"waiting"`
-3. If found → join that match; else → create new match
-4. When 2 players join → server broadcasts `game_start`, sets label to `"playing"`
+2. Server checks Nakama **storage** for an open lobby entry
+3. If found → delete the lobby entry → return that match ID to second player
+4. If not found → create new match → store match ID in storage → return to first player
+5. When 2 players join → server broadcasts `game_start`
+
+**Why Storage-Based Matchmaking?**
+Nakama's `matchList` API with size filters is unreliable for finished matches in this version. Using the storage API as a lobby ensures only active waiting matches are returned, and the atomic delete prevents race conditions.
 
 **Concurrent Game Support**
 Each match runs as an isolated Nakama authoritative match with its own goroutine and state. Hundreds of simultaneous games are supported natively — Nakama handles the scheduling. Game room isolation is guaranteed because state is scoped to the match instance.
@@ -74,7 +79,10 @@ Each match runs as an isolated Nakama authoritative match with its own goroutine
 - Updated server-side on game over or disconnect — client cannot manipulate scores
 
 **Authentication**
-Device-based auth (no sign-up required). A UUID is generated and persisted in `localStorage`. On reconnect, the same identity is restored.
+Device-based auth (no sign-up required). A UUID is generated and persisted in `localStorage`. On reconnect, the same identity is restored automatically.
+
+**JavaScript Runtime Note**
+Nakama 3.20's goja JS engine does not support ES6+ shorthand property syntax. The server module (`index.js`) is written in ES5-compatible JavaScript. The TypeScript source (`match_handler.ts`) is kept for reference and documentation purposes.
 
 ---
 
@@ -82,30 +90,41 @@ Device-based auth (no sign-up required). A UUID is generated and persisted in `l
 
 ```
 lila-tictactoe/
+├── .gitignore
 ├── docker-compose.yml              # Nakama + CockroachDB stack
+├── README.md
 ├── nakama-server/
-│   ├── src/
-│   │   ├── match_handler.ts        # All game + leaderboard + RPC logic
-│   │   └── nkruntime.d.ts          # Nakama runtime type declarations
 │   ├── build/
-│   │   └── match_handler.js        # Compiled output (mounted into Nakama)
-│   ├── tsconfig.json
-│   └── package.json
+│   │   └── index.js                # Compiled ES5 module (mounted into Nakama)
+│   ├── src/
+│   │   ├── match_handler.ts        # TypeScript source (game logic, RPCs, leaderboard)
+│   │   └── nkruntime.d.ts          # Nakama runtime type declarations
+│   ├── package.json
+│   ├── package-lock.json
+│   └── tsconfig.json
 └── frontend/
+    ├── public/
+    │   └── favicon.svg
     ├── src/
-    │   ├── App.tsx                  # Root component, phase routing
-    │   ├── App.css                  # Global styles (cyberpunk theme)
-    │   ├── main.tsx
+    │   ├── components/
+    │   │   ├── GameBoard.tsx        # Game board UI and cell interactions
+    │   │   ├── GameOverScreen.tsx   # Result screen with leaderboard
+    │   │   ├── LoginScreen.tsx      # Username entry screen
+    │   │   └── WaitingScreen.tsx    # Matchmaking waiting screen
     │   ├── hooks/
-    │   │   └── useNakama.ts         # All Nakama SDK logic
-    │   └── components/
-    │       ├── LoginScreen.tsx
-    │       ├── WaitingScreen.tsx
-    │       ├── GameBoard.tsx
-    │       └── GameOverScreen.tsx
-    ├── .env.example
-    ├── vite.config.ts
-    └── package.json
+    │   │   └── useNakama.ts         # All Nakama SDK logic (connection, matchmaking, state)
+    │   ├── App.css                  # Global styles (cyberpunk theme)
+    │   ├── App.tsx                  # Root component, phase routing
+    │   ├── main.tsx                 # React entry point
+    │   └── vite-env.d.ts            # Vite environment type declarations
+    ├── .env.example                 # Environment variables template
+    ├── index.html
+    ├── package.json
+    ├── package-lock.json
+    ├── tsconfig.json
+    ├── tsconfig.node.json
+    ├── vercel.json                  # Vercel deployment config
+    └── vite.config.ts
 ```
 
 ---
@@ -113,26 +132,18 @@ lila-tictactoe/
 ## Local Setup & Installation
 
 ### Prerequisites
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker + Docker Compose)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 - Node.js 18+
 
-### Step 1 — Build the Nakama TypeScript module
-
-```bash
-cd nakama-server
-npm install
-npx tsc
-# Output: build/match_handler.js
-```
-
-### Step 2 — Start Nakama + CockroachDB
+### Step 1 — Start Nakama + CockroachDB
 
 ```bash
 # From project root
-docker-compose up -d
+docker compose up -d
 
-# Wait ~30 seconds for CockroachDB to initialize, then check:
-docker-compose logs nakama | grep "Startup"
+# Wait ~30 seconds, then verify:
+docker compose logs nakama --tail=5
+# Should show: "Startup done" and "Tic-Tac-Toe module loaded ✓"
 ```
 
 Nakama will be available at:
@@ -140,79 +151,62 @@ Nakama will be available at:
 - Console UI: http://localhost:7351 (admin / admin_password)
 - gRPC: localhost:7349
 
-### Step 3 — Start the Frontend
+> Note: `nakama-server/build/index.js` is pre-compiled and committed to the repo. No separate build step is needed.
+
+### Step 2 — Start the Frontend
 
 ```bash
 cd frontend
 cp .env.example .env.local
-# Edit .env.local — defaults work for local Docker setup
-
 npm install
 npm run dev
 # → http://localhost:3000
 ```
 
-### Step 4 — Test Multiplayer
+### Step 3 — Test Multiplayer
 
-Open two browser tabs at `http://localhost:3000`. Enter different usernames in each tab. Both will be matchmade into the same game automatically.
+1. Open `http://localhost:3000` in a normal Chrome window
+2. Open `http://localhost:3000` in an Incognito window (Cmd+Shift+N)
+3. Enter different names in each → click **FIND MATCH**
+4. Both players are auto-matched and the game starts
+
+> Two separate browser contexts are needed because device auth uses `localStorage` — both tabs in the same window share the same identity.
 
 ---
 
 ## Deployment
 
-### Free Deployment — Zero Cost Setup
-
-#### Option A: Railway (Nakama) + Vercel (Frontend)
-
-**Deploy Nakama on Railway:**
-
-1. Create account at [railway.app](https://railway.app) (free tier, no credit card)
-2. New Project → Deploy from Docker Compose
-3. Upload `docker-compose.yml` or use Railway's template
-4. Set environment variables:
-   ```
-   NAKAMA_CONSOLE_USERNAME=admin
-   NAKAMA_CONSOLE_PASSWORD=your_secure_password
-   ```
-5. Railway will give you a public URL like `nakama-production.up.railway.app`
-6. Mount the `nakama-server/build/` folder contents as the modules volume
-
-**Deploy Frontend on Vercel:**
+### Frontend — Vercel (Free)
 
 ```bash
 cd frontend
-
-# Set production env vars
+# Set production env vars pointing to your Nakama server
 cp .env.example .env.production
-# Edit .env.production:
-# VITE_NAKAMA_HOST=nakama-production.up.railway.app
-# VITE_NAKAMA_PORT=443
-# VITE_NAKAMA_SSL=true
+# Edit VITE_NAKAMA_HOST, VITE_NAKAMA_PORT, VITE_NAKAMA_SSL
 
 npm run build
-
-# Install Vercel CLI
-npm i -g vercel
-vercel --prod
+npx vercel --prod
 ```
 
-#### Option B: Fly.io (Nakama) — also free tier
+Or connect GitHub repo to Vercel dashboard with Root Directory set to `frontend`.
 
+### Backend — Docker Compose (Local or Cloud)
+
+The Nakama server runs via Docker Compose. For cloud deployment:
+
+**Option A: Any VPS (DigitalOcean, AWS EC2, etc.)**
 ```bash
-# Install flyctl
-curl -L https://fly.io/install.sh | sh
-
-# From project root
-fly launch --name lila-nakama
-fly deploy
+# Copy project to server
+scp -r . user@your-server:~/lila-tictactoe
+ssh user@your-server
+cd lila-tictactoe && docker compose up -d
 ```
 
-#### Option C: Local + ngrok (for sharing without deploying)
-
+**Option B: Local + ngrok (for demo/testing)**
 ```bash
-# After docker-compose up
+# After docker compose up -d
 ngrok http 7350
-# Use the ngrok URL as VITE_NAKAMA_HOST
+# Use the ngrok URL as VITE_NAKAMA_HOST in frontend .env
 ```
 
 ---
@@ -225,7 +219,7 @@ ngrok http 7350
 ```json
 // Request: {}
 // Response:
-{ "matchId": "uuid-of-match" }
+{ "matchId": "uuid-of-match.nakama1" }
 ```
 
 **POST /v2/rpc/get_leaderboard**
@@ -241,18 +235,12 @@ ngrok http 7350
 
 ### WebSocket Message Format
 
-Connect to: `ws://localhost:7350/ws?token=<session_token>`
-
 **Server → Client OpCode 1 (game events):**
 ```json
-// game_start
 { "type": "game_start", "board": [null,...], "marks": {"userId": "X"}, "turn": "userId", "players": {"userId": "username"} }
-
-// move
 { "type": "move", "board": [...], "turn": "userId", "lastMove": { "position": 4, "mark": "X", "player": "userId" } }
-
-// game_over
-{ "type": "game_over", "winner": "userId|draw|disconnect", "board": [...], "reason": "win|draw|opponent_disconnected" }
+{ "type": "game_over", "winner": "userId|draw", "board": [...], "reason": "win|draw|opponent_disconnected" }
+{ "type": "waiting", "message": "Waiting for opponent..." }
 ```
 
 **Client → Server OpCode 2 (player move):**
@@ -263,34 +251,40 @@ Connect to: `ws://localhost:7350/ws?token=<session_token>`
 ### Leaderboard Configuration
 - ID: `global_leaderboard`
 - Sort: descending by score
-- Operator: increment (scores accumulate)
+- Operator: increment (scores accumulate over time)
 - Reset: monthly (1st of each month at midnight)
 
 ---
 
 ## How to Test Multiplayer
 
-### Manual Test
-1. Open `http://localhost:3000` in two separate browser windows (or one normal + one incognito)
-2. Enter a username in each and click **FIND MATCH**
-3. Both players will be auto-matched within seconds
-4. Take turns clicking cells — only the current player's clicks are accepted
-5. Try clicking out of turn — the server rejects it (error toast appears)
-6. After game ends, the leaderboard updates automatically
+### Basic Game Test
+1. Open `http://localhost:3000` in Chrome (normal window)
+2. Open `http://localhost:3000` in Chrome Incognito (Cmd+Shift+N)
+3. Enter different names → click **FIND MATCH** in both
+4. Game board appears in both windows simultaneously
+5. Take turns clicking cells — only the active player's clicks register
+6. Try clicking out of turn → server rejects it with an error toast
+7. After game ends → leaderboard updates with scores
 
 ### Verify Server-Authoritative Logic
-- Open browser DevTools → Network → WS
-- Observe all game state comes FROM the server, not computed client-side
-- The client only sends `{ "position": N }` — all validation happens server-side
+- Open DevTools → Network → WS tab
+- All game state arrives FROM the server
+- Client only sends `{ "position": N }` — zero game logic on client side
 
 ### Test Disconnect Handling
-- Mid-game, close one browser tab
-- The remaining player sees "Opponent Left" and is credited a win
-- Leaderboard updates correctly
+- During a game, close one browser window
+- The remaining player sees "Opponent Left" and wins automatically
+- Leaderboard credits the win correctly
 
 ### Test Concurrent Sessions
-- Open 4+ tabs and create 2+ simultaneous games
-- Each game is fully isolated with independent state
+- Open 4 browser contexts (2 normal + 2 incognito won't work — use different browsers)
+- Each pair gets isolated game sessions with independent state
+
+### Test Play Again
+- After game over, click **Play Again** in both windows
+- Both reconnect and find each other in a new match automatically
+- No need to re-enter username
 
 ---
 
@@ -299,21 +293,22 @@ Connect to: `ws://localhost:7350/ws?token=<session_token>`
 | Layer | Technology |
 |---|---|
 | Game Backend | Nakama 3.20 (Go) |
-| Server Logic | TypeScript (Nakama TS Runtime) |
+| Server Logic | JavaScript ES5 (Nakama JS Runtime / goja) |
+| Server Source | TypeScript (compiled to ES5) |
 | Database | CockroachDB (Postgres-compatible) |
 | Frontend | React 18 + Vite |
-| Client SDK | @heroiclabs/nakama-js |
+| Client SDK | @heroiclabs/nakama-js 2.8.0 |
 | Styling | Pure CSS (no UI library) |
-| Local Dev | Docker Compose |
+| Local Dev | Docker Compose v2 |
 | Frontend Deploy | Vercel (free) |
-| Backend Deploy | Railway / Fly.io (free tier) |
+| Backend Deploy | Docker Compose (local / any VPS) |
 
 ---
 
 ## Bonus Features Implemented
 
-- ✅ **Concurrent Game Support** — Nakama's authoritative match system natively isolates each game session. Multiple games run simultaneously with zero shared state.
-- ✅ **Leaderboard System** — Global ranking by score (Win=3, Draw=1, Loss=0) with monthly reset. Updated server-side on every game conclusion, including disconnects.
+- ✅ **Concurrent Game Support** — Each game runs as an isolated Nakama authoritative match with its own goroutine and state. The storage-based lobby ensures players join separate matches. Multiple simultaneous games run with zero shared state.
+- ✅ **Leaderboard System** — Global ranking by score (Win=3, Draw=1, Loss=0) with monthly reset. Updated server-side on every game conclusion including disconnects. Displayed on game over screen with player highlighted.
 
 ---
 
