@@ -1,0 +1,12 @@
+{
+  "name": "lila-tictactoe-server",
+  "version": "1.0.0",
+  "description": "Nakama server runtime for LILA Tic-Tac-Toe",
+  "scripts": {
+    "build": "npx tsc",
+    "watch": "npx tsc --watch"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

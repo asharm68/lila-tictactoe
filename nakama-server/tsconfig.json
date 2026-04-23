@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "es2019",
+    "strict": false,
+    "outDir": "./build",
+    "rootDir": "./src",
+    "lib": ["es2019"],
+    "noImplicitReturns": false,
+    "noUnusedLocals": false,
+    "esModuleInterop": true
+  },
+  "include": ["src/**/*"]
+}
